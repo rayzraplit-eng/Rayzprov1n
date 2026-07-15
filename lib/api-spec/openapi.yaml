@@ -3,20 +3,27 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: RAYZPRO API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: accounts
+    description: Deriv account management
+  - name: bots
+    description: Bot management
+  - name: trades
+    description: Trade journal
+  - name: stats
+    description: Dashboard statistics
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +31,250 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags: [accounts]
+      summary: List connected Deriv accounts
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      operationId: createAccount
+      tags: [accounts]
+      summary: Connect a Deriv account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountInput"
+      responses:
+        "201":
+          description: Account connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /accounts/{id}:
+    delete:
+      operationId: deleteAccount
+      tags: [accounts]
+      summary: Disconnect a Deriv account
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /bots:
+    get:
+      operationId: listBots
+      tags: [bots]
+      summary: List all bots
+      responses:
+        "200":
+          description: List of bots
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Bot"
+    post:
+      operationId: createBot
+      tags: [bots]
+      summary: Create a bot
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotInput"
+      responses:
+        "201":
+          description: Bot created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bot"
+
+  /bots/{id}:
+    get:
+      operationId: getBot
+      tags: [bots]
+      summary: Get a bot by ID
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Bot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bot"
+    patch:
+      operationId: updateBot
+      tags: [bots]
+      summary: Update a bot
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotUpdate"
+      responses:
+        "200":
+          description: Updated bot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bot"
+    delete:
+      operationId: deleteBot
+      tags: [bots]
+      summary: Delete a bot
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /bots/{id}/status:
+    patch:
+      operationId: updateBotStatus
+      tags: [bots]
+      summary: Start or stop a bot
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotStatusUpdate"
+      responses:
+        "200":
+          description: Updated bot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Bot"
+
+  /trades:
+    get:
+      operationId: listTrades
+      tags: [trades]
+      summary: List trade journal entries
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: offset
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
+    post:
+      operationId: createTrade
+      tags: [trades]
+      summary: Log a trade
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TradeInput"
+      responses:
+        "201":
+          description: Trade logged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trade"
+
+  /trades/{id}:
+    delete:
+      operationId: deleteTrade
+      tags: [trades]
+      summary: Delete a trade entry
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /stats:
+    get:
+      operationId: getStats
+      tags: [stats]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+
+  /stats/recent-trades:
+    get:
+      operationId: getRecentTrades
+      tags: [stats]
+      summary: Get recent trades for the activity feed
+      responses:
+        "200":
+          description: Recent trades
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +285,162 @@ components:
       required:
         - status
 
+    Account:
+      type: object
+      required: [id, loginId, currency, accountType, createdAt]
+      properties:
+        id:
+          type: integer
+        loginId:
+          type: string
+        currency:
+          type: string
+        accountType:
+          type: string
+        balance:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+
+    AccountInput:
+      type: object
+      required: [loginId, token, currency, accountType]
+      properties:
+        loginId:
+          type: string
+        token:
+          type: string
+        currency:
+          type: string
+        accountType:
+          type: string
+
+    Bot:
+      type: object
+      required: [id, name, strategy, status, markets, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        strategy:
+          type: string
+        status:
+          type: string
+        markets:
+          type: array
+          items:
+            type: string
+        stake:
+          type: ["number", "null"]
+        winCount:
+          type: integer
+        lossCount:
+          type: integer
+        totalProfit:
+          type: number
+        createdAt:
+          type: string
+
+    BotInput:
+      type: object
+      required: [name, strategy, markets]
+      properties:
+        name:
+          type: string
+        strategy:
+          type: string
+        markets:
+          type: array
+          items:
+            type: string
+        stake:
+          type: ["number", "null"]
+
+    BotUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        strategy:
+          type: string
+        markets:
+          type: array
+          items:
+            type: string
+        stake:
+          type: ["number", "null"]
+
+    BotStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+
+    Trade:
+      type: object
+      required: [id, symbol, contractType, stake, outcome, profit, createdAt]
+      properties:
+        id:
+          type: integer
+        symbol:
+          type: string
+        contractType:
+          type: string
+        stake:
+          type: number
+        duration:
+          type: ["integer", "null"]
+        outcome:
+          type: string
+        profit:
+          type: number
+        entryDigit:
+          type: ["integer", "null"]
+        exitDigit:
+          type: ["integer", "null"]
+        botId:
+          type: ["integer", "null"]
+        createdAt:
+          type: string
+
+    TradeInput:
+      type: object
+      required: [symbol, contractType, stake, outcome, profit]
+      properties:
+        symbol:
+          type: string
+        contractType:
+          type: string
+        stake:
+          type: number
+        duration:
+          type: ["integer", "null"]
+        outcome:
+          type: string
+        profit:
+          type: number
+        entryDigit:
+          type: ["integer", "null"]
+        exitDigit:
+          type: ["integer", "null"]
+        botId:
+          type: ["integer", "null"]
+
+    Stats:
+      type: object
+      required: [totalProfit, winRate, totalTrades, runningBots, winCount, lossCount]
+      properties:
+        totalProfit:
+          type: number
+        winRate:
+          type: number
+        totalTrades:
+          type: integer
+        runningBots:
+          type: integer
+        winCount:
+          type: integer
+        lossCount:
+          type: integer

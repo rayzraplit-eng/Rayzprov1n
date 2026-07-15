@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "RAYZPRO"
+version = "1.0.0"
+id = "artifacts/rayzpro"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24881
+
+[services.development]
+run = "pnpm --filter @workspace/rayzpro run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/rayzpro", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/rayzpro/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24881"
+BASE_PATH = "/"

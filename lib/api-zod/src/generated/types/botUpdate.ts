@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface HealthStatus {
-  status: string;
+export interface BotUpdate {
+  name?: string;
+  strategy?: string;
+  markets?: string[];
+  /** @nullable */
+  stake?: number | null;
 }
