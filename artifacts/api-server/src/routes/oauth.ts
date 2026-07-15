@@ -1,83 +1,107 @@
 /**
- * OAuth route — Deriv PKCE flow only (new api.deriv.com registration).
+ * OAuth route — Deriv PKCE flow (new api.deriv.com / auth.deriv.com registration).
  *
  * POST /oauth/exchange
  *   Frontend sends: { code, codeVerifier, redirectUri }
- *   1. Exchanges auth code for access_token at oauth.deriv.com/oauth2/token
- *   2. Authorises via Deriv WebSocket → retrieves all linked account tokens
+ *   1. Exchanges auth code for access_token at auth.deriv.com/oauth2/token
+ *   2. Fetches all linked Options accounts via REST (api.derivws.com)
  *   3. Persists each account to the database
  *   Returns: { count: number }
+ *
+ * REST API reference:
+ *   GET https://api.derivws.com/trading/v1/options/accounts
+ *   Headers: Deriv-App-ID + Authorization: Bearer <access_token>
+ *   Response: { data: OptionsAccount[], meta: {} }
  */
 
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, accountsTable } from "@workspace/db";
-import { fetchDerivAccountInfo, fetchDerivAccountsFromOAuth, DerivAuthError } from "../lib/deriv";
 
 const router: IRouter = Router();
 
-const DERIV_APP_ID   = process.env.DERIV_APP_ID ?? "";
-// New Deriv API token endpoint — auth.deriv.com (not the legacy oauth.deriv.com)
-const TOKEN_ENDPOINT = "https://auth.deriv.com/oauth2/token";
+const DERIV_APP_ID      = process.env.DERIV_APP_ID ?? "";
+const TOKEN_ENDPOINT    = "https://auth.deriv.com/oauth2/token";
+const ACCOUNTS_ENDPOINT = "https://api.derivws.com/trading/v1/options/accounts";
 
-// ── Save a list of {loginid, token} pairs to the DB ──────────────────────────
+// ── Types from Deriv OpenAPI spec ─────────────────────────────────────────────
+
+interface DerivOptionsAccount {
+  id:           string;
+  account_type: "real" | "demo" | string;
+  currency:     string;
+  balance:      number;
+  // additional fields that may be present
+  loginid?:     string;
+  email?:       string;
+  country?:     string;
+  status?:      string;
+}
+
+interface DerivAccountsResponse {
+  data: DerivOptionsAccount[];
+  meta?: Record<string, unknown>;
+}
+
+// ── Save accounts to the DB ───────────────────────────────────────────────────
 
 async function saveAccounts(
-  accounts: Array<{ loginid: string; token: string }>,
+  accounts: DerivOptionsAccount[],
+  accessToken: string,
   log: { warn(obj: object, msg: string): void },
 ): Promise<number> {
-  const existingRows  = await db.select().from(accountsTable);
-  const isFirstBatch  = existingRows.length === 0;
-  let savedCount      = 0;
+  const existingRows = await db.select().from(accountsTable);
+  const isFirstBatch = existingRows.length === 0;
+  let saved = 0;
 
-  for (const { loginid, token } of accounts) {
-    let info;
-    try {
-      info = await fetchDerivAccountInfo(token);
-    } catch (err) {
-      log.warn({ err, loginid }, "Could not fetch account info — skipping");
-      continue;
-    }
+  for (const account of accounts) {
+    const loginid     = account.loginid ?? account.id;
+    const currency    = account.currency ?? "USD";
+    const balance     = typeof account.balance === "number" ? account.balance : 0;
+    const accountType = account.account_type === "demo" ? "demo" : "real";
 
     const [existing] = await db
       .select()
       .from(accountsTable)
       .where(eq(accountsTable.loginid, loginid));
 
-    if (existing) {
-      await db
-        .update(accountsTable)
-        .set({ apiToken: token, balance: info.balance, currency: info.currency })
-        .where(eq(accountsTable.loginid, loginid));
-    } else {
-      await db.insert(accountsTable).values({
-        label:       loginid,
-        apiToken:    token,
-        loginid:     info.loginid,
-        accountType: info.accountType,
-        currency:    info.currency,
-        balance:     info.balance,
-        email:       info.email,
-        country:     info.country,
-        isActive:    isFirstBatch && savedCount === 0,
-      });
+    try {
+      if (existing) {
+        await db
+          .update(accountsTable)
+          .set({ apiToken: accessToken, balance, currency })
+          .where(eq(accountsTable.loginid, loginid));
+      } else {
+        await db.insert(accountsTable).values({
+          label:       loginid,
+          apiToken:    accessToken,     // OAuth Bearer token stored for future API calls
+          loginid,
+          accountType,
+          currency,
+          balance,
+          email:       account.email   ?? null,
+          country:     account.country ?? null,
+          isActive:    isFirstBatch && saved === 0,
+        });
+      }
+      saved++;
+    } catch (err) {
+      log.warn({ err, loginid }, "Could not save account — skipping");
     }
-
-    savedCount++;
   }
 
-  return savedCount;
+  return saved;
 }
 
-// ── POST /oauth/exchange — PKCE code → tokens → save accounts ─────────────────
+// ── POST /oauth/exchange ───────────────────────────────────────────────────────
 
 router.post("/oauth/exchange", async (req, res): Promise<void> => {
   const { code, codeVerifier, redirectUri } = req.body as Record<string, unknown>;
 
   if (
-    typeof code          !== "string" || !code ||
-    typeof codeVerifier  !== "string" || !codeVerifier ||
-    typeof redirectUri   !== "string" || !redirectUri
+    typeof code         !== "string" || !code ||
+    typeof codeVerifier !== "string" || !codeVerifier ||
+    typeof redirectUri  !== "string" || !redirectUri
   ) {
     res.status(400).json({ error: "Missing required fields: code, codeVerifier, redirectUri" });
     return;
@@ -88,7 +112,7 @@ router.post("/oauth/exchange", async (req, res): Promise<void> => {
     return;
   }
 
-  // ── 1. Exchange PKCE code for access_token ─────────────────────────────────
+  // ── 1. Exchange PKCE code for access_token ────────────────────────────────
   let accessToken: string;
   try {
     const tokenRes = await fetch(TOKEN_ENDPOINT, {
@@ -103,14 +127,20 @@ router.post("/oauth/exchange", async (req, res): Promise<void> => {
       }),
     });
 
+    const rawBody = await tokenRes.text();
+
     if (!tokenRes.ok) {
-      const body = await tokenRes.text();
-      req.log.warn({ status: tokenRes.status, body }, "Deriv token endpoint error");
-      res.status(400).json({ error: `Deriv token exchange failed (${tokenRes.status}): ${body}` });
+      req.log.warn({ status: tokenRes.status, body: rawBody }, "Deriv token endpoint error");
+      let msg = `Token exchange failed (HTTP ${tokenRes.status})`;
+      try {
+        const parsed = JSON.parse(rawBody) as { error_description?: string; error?: string };
+        msg = parsed.error_description ?? parsed.error ?? msg;
+      } catch { /* not JSON */ }
+      res.status(400).json({ error: msg });
       return;
     }
 
-    const tokenData = await tokenRes.json() as {
+    const tokenData = JSON.parse(rawBody) as {
       access_token?: string;
       error?: string;
       error_description?: string;
@@ -124,32 +154,65 @@ router.post("/oauth/exchange", async (req, res): Promise<void> => {
 
     accessToken = tokenData.access_token;
   } catch (err) {
-    req.log.error({ err }, "Failed to call Deriv token endpoint");
+    req.log.error({ err }, "Failed to reach Deriv token endpoint");
     res.status(502).json({ error: "Could not reach Deriv token endpoint" });
     return;
   }
 
-  // ── 2. Authorise via WebSocket → get all linked account tokens ─────────────
-  let accounts: Array<{ loginid: string; token: string }>;
+  // ── 2. Fetch linked accounts via REST ─────────────────────────────────────
+  let accounts: DerivOptionsAccount[];
   try {
-    accounts = await fetchDerivAccountsFromOAuth(accessToken);
+    const accountsRes = await fetch(ACCOUNTS_ENDPOINT, {
+      method:  "GET",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "Deriv-App-ID":  DERIV_APP_ID,
+        "Content-Type":  "application/json",
+      },
+    });
+
+    const rawBody = await accountsRes.text();
+    req.log.info({ status: accountsRes.status, body: rawBody.slice(0, 500) }, "Deriv accounts response");
+
+    if (!accountsRes.ok) {
+      let msg = `Failed to fetch accounts (HTTP ${accountsRes.status})`;
+      try {
+        const parsed = JSON.parse(rawBody) as { errors?: Array<{ message?: string }> };
+        msg = parsed.errors?.[0]?.message ?? msg;
+      } catch { /* not JSON */ }
+      res.status(400).json({ error: msg });
+      return;
+    }
+
+    const parsed = JSON.parse(rawBody) as DerivAccountsResponse;
+
+    // Response shape: { data: [...] } per OpenAPI spec
+    if (Array.isArray(parsed.data)) {
+      accounts = parsed.data;
+    } else if (Array.isArray(parsed as unknown as DerivOptionsAccount[])) {
+      // Fallback: top-level array
+      accounts = parsed as unknown as DerivOptionsAccount[];
+    } else {
+      req.log.warn({ parsed }, "Unexpected accounts response shape");
+      accounts = [];
+    }
   } catch (err) {
-    const message = err instanceof DerivAuthError
-      ? err.message
-      : "Failed to retrieve accounts from Deriv";
-    req.log.warn({ err }, "Deriv OAuth account fetch failed");
-    res.status(400).json({ error: message });
+    req.log.error({ err }, "Failed to fetch Deriv accounts");
+    res.status(502).json({ error: "Could not retrieve accounts from Deriv" });
     return;
   }
 
   if (accounts.length === 0) {
-    res.status(400).json({ error: "No accounts returned by Deriv. Make sure at least one account is active." });
+    res.status(400).json({
+      error: "No Options trading accounts found on this Deriv account. " +
+             "Make sure you have at least one real or demo account.",
+    });
     return;
   }
 
-  // ── 3. Persist accounts ────────────────────────────────────────────────────
-  const savedCount = await saveAccounts(accounts, req.log);
-  res.json({ count: savedCount });
+  // ── 3. Persist accounts ───────────────────────────────────────────────────
+  const count = await saveAccounts(accounts, accessToken, req.log);
+  res.json({ count });
 });
 
 export default router;
