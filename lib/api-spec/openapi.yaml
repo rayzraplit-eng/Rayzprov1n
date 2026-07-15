@@ -3,7 +3,7 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: RAYZPRO API specification
+  description: TradeHub - Deriv Companion API
 servers:
   - url: /api
     description: Base API path
@@ -11,13 +11,15 @@ tags:
   - name: health
     description: Health operations
   - name: accounts
-    description: Deriv account management
+    description: Deriv account connections
   - name: bots
-    description: Bot management
+    description: Trading bots (XML files for Deriv DBot)
+  - name: tools
+    description: Trading tools and calculators
   - name: trades
-    description: Trade journal
-  - name: stats
-    description: Dashboard statistics
+    description: Trade journal entries
+  - name: dashboard
+    description: Dashboard summary endpoints
 paths:
   /healthz:
     get:
@@ -47,15 +49,15 @@ paths:
                 items:
                   $ref: "#/components/schemas/Account"
     post:
-      operationId: createAccount
+      operationId: connectAccount
       tags: [accounts]
-      summary: Connect a Deriv account
+      summary: Connect a Deriv account using an API token
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AccountInput"
+              $ref: "#/components/schemas/ConnectAccountBody"
       responses:
         "201":
           description: Account connected
@@ -63,27 +65,92 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Account"
-
+  /accounts/oauth/deriv/callback:
+    post:
+      operationId: connectAccountsViaDerivOAuth
+      tags: [accounts]
+      summary: Exchange a Deriv OAuth2 authorization code for account(s)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DerivOAuthCallbackBody"
+      responses:
+        "200":
+          description: Accounts connected via OAuth
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DerivOAuthCallbackResponse"
   /accounts/{id}:
     delete:
-      operationId: deleteAccount
+      operationId: disconnectAccount
       tags: [accounts]
-      summary: Disconnect a Deriv account
+      summary: Disconnect (remove) an account
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
           required: true
           schema:
             type: integer
       responses:
         "204":
-          description: Deleted
+          description: Disconnected
+    patch:
+      operationId: updateAccount
+      tags: [accounts]
+      summary: Update an account (set as active, rename label)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAccountBody"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+  /accounts/{id}/refresh:
+    post:
+      operationId: refreshAccountBalance
+      tags: [accounts]
+      summary: Pull the latest realtime balance for an account from Deriv
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Account with refreshed balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
 
   /bots:
     get:
       operationId: listBots
       tags: [bots]
-      summary: List all bots
+      summary: List imported bots
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search by name or tag
       responses:
         "200":
           description: List of bots
@@ -94,31 +161,30 @@ paths:
                 items:
                   $ref: "#/components/schemas/Bot"
     post:
-      operationId: createBot
+      operationId: importBot
       tags: [bots]
-      summary: Create a bot
+      summary: Import a new bot (XML content)
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BotInput"
+              $ref: "#/components/schemas/ImportBotBody"
       responses:
         "201":
-          description: Bot created
+          description: Bot imported
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Bot"
-
   /bots/{id}:
     get:
       operationId: getBot
       tags: [bots]
-      summary: Get a bot by ID
+      summary: Get bot details (including XML content)
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
           required: true
           schema:
             type: integer
@@ -128,14 +194,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Bot"
+                $ref: "#/components/schemas/BotDetail"
     patch:
       operationId: updateBot
       tags: [bots]
-      summary: Update a bot
+      summary: Update bot metadata
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
           required: true
           schema:
             type: integer
@@ -144,7 +210,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BotUpdate"
+              $ref: "#/components/schemas/UpdateBotBody"
       responses:
         "200":
           description: Updated bot
@@ -157,32 +223,25 @@ paths:
       tags: [bots]
       summary: Delete a bot
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
           required: true
           schema:
             type: integer
       responses:
         "204":
           description: Deleted
-
-  /bots/{id}/status:
-    patch:
-      operationId: updateBotStatus
+  /bots/{id}/toggle-favorite:
+    post:
+      operationId: toggleBotFavorite
       tags: [bots]
-      summary: Start or stop a bot
+      summary: Toggle the favorite flag for a bot
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
           required: true
           schema:
             type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BotStatusUpdate"
       responses:
         "200":
           description: Updated bot
@@ -191,23 +250,99 @@ paths:
               schema:
                 $ref: "#/components/schemas/Bot"
 
+  /tools:
+    get:
+      operationId: listTools
+      tags: [tools]
+      summary: List built-in trading tools
+      responses:
+        "200":
+          description: Tools
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tool"
+
+  /tools/martingale:
+    post:
+      operationId: calculateMartingale
+      tags: [tools]
+      summary: Calculate a martingale staking plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MartingaleBody"
+      responses:
+        "200":
+          description: Martingale plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MartingaleResult"
+
+  /tools/risk:
+    post:
+      operationId: calculateRisk
+      tags: [tools]
+      summary: Position size based on account risk percentage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiskBody"
+      responses:
+        "200":
+          description: Risk plan
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RiskResult"
+
+  /tools/compound:
+    post:
+      operationId: calculateCompound
+      tags: [tools]
+      summary: Compound growth projection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompoundBody"
+      responses:
+        "200":
+          description: Compound projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompoundResult"
+
   /trades:
     get:
       operationId: listTrades
       tags: [trades]
       summary: List trade journal entries
       parameters:
-        - in: query
-          name: limit
+        - name: limit
+          in: query
+          required: false
           schema:
             type: integer
-        - in: query
-          name: offset
+            default: 50
+        - name: result
+          in: query
+          required: false
           schema:
-            type: integer
+            type: string
+            enum: [win, loss, breakeven]
       responses:
         "200":
-          description: List of trades
+          description: Trade entries
           content:
             application/json:
               schema:
@@ -217,29 +352,28 @@ paths:
     post:
       operationId: createTrade
       tags: [trades]
-      summary: Log a trade
+      summary: Add a manual trade journal entry
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TradeInput"
+              $ref: "#/components/schemas/CreateTradeBody"
       responses:
         "201":
-          description: Trade logged
+          description: Trade
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Trade"
-
   /trades/{id}:
     delete:
       operationId: deleteTrade
       tags: [trades]
-      summary: Delete a trade entry
+      summary: Delete a trade
       parameters:
-        - in: path
-          name: id
+        - name: id
+          in: path
           required: true
           schema:
             type: integer
@@ -247,33 +381,48 @@ paths:
         "204":
           description: Deleted
 
-  /stats:
+  /dashboard/summary:
     get:
-      operationId: getStats
-      tags: [stats]
-      summary: Get dashboard statistics
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Aggregated stats for the home dashboard
       responses:
         "200":
-          description: Dashboard stats
+          description: Summary
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Stats"
+                $ref: "#/components/schemas/DashboardSummary"
 
-  /stats/recent-trades:
+  /dashboard/equity-curve:
     get:
-      operationId: getRecentTrades
-      tags: [stats]
-      summary: Get recent trades for the activity feed
+      operationId: getEquityCurve
+      tags: [dashboard]
+      summary: Cumulative P&L over time from journaled trades
       responses:
         "200":
-          description: Recent trades
+          description: Equity curve points
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/Trade"
+                  $ref: "#/components/schemas/EquityPoint"
+
+  /dashboard/symbol-breakdown:
+    get:
+      operationId: getSymbolBreakdown
+      tags: [dashboard]
+      summary: Profit grouped by symbol
+      responses:
+        "200":
+          description: Symbol breakdown
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SymbolBreakdownItem"
 
 components:
   schemas:
@@ -282,105 +431,293 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
     Account:
       type: object
-      required: [id, loginId, currency, accountType, createdAt]
       properties:
         id:
           type: integer
-        loginId:
+        label:
           type: string
-        currency:
+        loginid:
           type: string
         accountType:
+          type: string
+          description: real or demo
+        currency:
           type: string
         balance:
-          type: ["number", "null"]
-        createdAt:
+          type: number
+        email:
           type: string
+        country:
+          type: string
+        isActive:
+          type: boolean
+        connectedAt:
+          type: string
+          format: date-time
+      required: [id, label, loginid, accountType, currency, balance, isActive, connectedAt]
 
-    AccountInput:
+    ConnectAccountBody:
       type: object
-      required: [loginId, token, currency, accountType]
       properties:
-        loginId:
+        label:
           type: string
-        token:
+          minLength: 1
+        apiToken:
           type: string
-        currency:
+          minLength: 8
+          description: Deriv API token (read/trade scopes)
+      required: [label, apiToken]
+
+    UpdateAccountBody:
+      type: object
+      properties:
+        label:
           type: string
-        accountType:
+        isActive:
+          type: boolean
+
+    DerivOAuthCallbackBody:
+      type: object
+      properties:
+        code:
           type: string
+          minLength: 1
+          description: Authorization code returned by Deriv's OAuth2 /oauth2/auth endpoint
+        codeVerifier:
+          type: string
+          minLength: 1
+          description: PKCE code_verifier generated before the redirect
+        redirectUri:
+          type: string
+          minLength: 1
+          description: Exact redirect_uri used in the authorize request
+      required: [code, codeVerifier, redirectUri]
+
+    DerivOAuthCallbackResponse:
+      type: object
+      properties:
+        connected:
+          type: integer
+          description: Number of accounts connected or updated
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Account"
+      required: [connected, accounts]
 
     Bot:
       type: object
-      required: [id, name, strategy, status, markets, createdAt]
       properties:
         id:
           type: integer
         name:
           type: string
+        description:
+          type: string
         strategy:
           type: string
-        status:
+          description: e.g. Martingale, D'Alembert, Custom
+        market:
           type: string
-        markets:
+          description: e.g. Volatility 75, Boom 1000
+        tags:
           type: array
           items:
             type: string
-        stake:
-          type: ["number", "null"]
-        winCount:
+        favorite:
+          type: boolean
+        sizeBytes:
           type: integer
-        lossCount:
-          type: integer
-        totalProfit:
-          type: number
+        status:
+          type: string
+          enum: [idle, running, paused]
+        lastRunAt:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
           type: string
+          format: date-time
+      required: [id, name, strategy, market, tags, favorite, sizeBytes, status, createdAt]
 
-    BotInput:
-      type: object
-      required: [name, strategy, markets]
-      properties:
-        name:
-          type: string
-        strategy:
-          type: string
-        markets:
-          type: array
-          items:
-            type: string
-        stake:
-          type: ["number", "null"]
+    BotDetail:
+      allOf:
+        - $ref: "#/components/schemas/Bot"
+        - type: object
+          properties:
+            xmlContent:
+              type: string
+              description: Full Deriv DBot XML content
+          required: [xmlContent]
 
-    BotUpdate:
+    ImportBotBody:
       type: object
       properties:
         name:
           type: string
+          minLength: 1
+        description:
+          type: string
         strategy:
           type: string
-        markets:
+        market:
+          type: string
+        tags:
           type: array
           items:
             type: string
-        stake:
-          type: ["number", "null"]
+        xmlContent:
+          type: string
+          minLength: 1
+      required: [name, xmlContent]
 
-    BotStatusUpdate:
+    UpdateBotBody:
       type: object
-      required: [status]
       properties:
+        name:
+          type: string
+        description:
+          type: string
+        strategy:
+          type: string
+        market:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
         status:
           type: string
+          enum: [idle, running, paused]
+
+    Tool:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        icon:
+          type: string
+      required: [id, name, description, category, icon]
+
+    MartingaleBody:
+      type: object
+      properties:
+        baseStake:
+          type: number
+          minimum: 0.01
+        multiplier:
+          type: number
+          minimum: 1
+        steps:
+          type: integer
+          minimum: 1
+          maximum: 25
+        payoutPercent:
+          type: number
+          description: e.g. 95 for 95% payout
+      required: [baseStake, multiplier, steps, payoutPercent]
+
+    MartingaleStep:
+      type: object
+      properties:
+        step:
+          type: integer
+        stake:
+          type: number
+        cumulativeLoss:
+          type: number
+        payout:
+          type: number
+        netIfWin:
+          type: number
+      required: [step, stake, cumulativeLoss, payout, netIfWin]
+
+    MartingaleResult:
+      type: object
+      properties:
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/MartingaleStep"
+        totalRisk:
+          type: number
+      required: [steps, totalRisk]
+
+    RiskBody:
+      type: object
+      properties:
+        accountBalance:
+          type: number
+          minimum: 0
+        riskPercent:
+          type: number
+          minimum: 0.1
+          maximum: 100
+        stopLossPips:
+          type: number
+          minimum: 1
+        pipValue:
+          type: number
+          minimum: 0.01
+      required: [accountBalance, riskPercent, stopLossPips, pipValue]
+
+    RiskResult:
+      type: object
+      properties:
+        riskAmount:
+          type: number
+        positionSize:
+          type: number
+      required: [riskAmount, positionSize]
+
+    CompoundBody:
+      type: object
+      properties:
+        startingBalance:
+          type: number
+          minimum: 0
+        dailyReturnPercent:
+          type: number
+        days:
+          type: integer
+          minimum: 1
+          maximum: 365
+      required: [startingBalance, dailyReturnPercent, days]
+
+    CompoundPoint:
+      type: object
+      properties:
+        day:
+          type: integer
+        balance:
+          type: number
+      required: [day, balance]
+
+    CompoundResult:
+      type: object
+      properties:
+        points:
+          type: array
+          items:
+            $ref: "#/components/schemas/CompoundPoint"
+        finalBalance:
+          type: number
+        totalProfit:
+          type: number
+      required: [points, finalBalance, totalProfit]
 
     Trade:
       type: object
-      required: [id, symbol, contractType, stake, outcome, profit, createdAt]
       properties:
         id:
           type: integer
@@ -388,59 +725,99 @@ components:
           type: string
         contractType:
           type: string
+          description: e.g. CALL, PUT, RISE, FALL, DIGITS
         stake:
           type: number
-        duration:
-          type: ["integer", "null"]
-        outcome:
-          type: string
+        payout:
+          type: number
         profit:
           type: number
-        entryDigit:
-          type: ["integer", "null"]
-        exitDigit:
-          type: ["integer", "null"]
-        botId:
-          type: ["integer", "null"]
-        createdAt:
+        result:
           type: string
+          enum: [win, loss, breakeven]
+        botId:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+        tradedAt:
+          type: string
+          format: date-time
+      required: [id, symbol, contractType, stake, payout, profit, result, tradedAt]
 
-    TradeInput:
+    CreateTradeBody:
       type: object
-      required: [symbol, contractType, stake, outcome, profit]
       properties:
         symbol:
           type: string
+          minLength: 1
         contractType:
           type: string
+          minLength: 1
         stake:
           type: number
-        duration:
-          type: ["integer", "null"]
-        outcome:
-          type: string
+        payout:
+          type: number
         profit:
           type: number
-        entryDigit:
-          type: ["integer", "null"]
-        exitDigit:
-          type: ["integer", "null"]
+        result:
+          type: string
+          enum: [win, loss, breakeven]
         botId:
-          type: ["integer", "null"]
+          type: integer
+          nullable: true
+        notes:
+          type: string
+        tradedAt:
+          type: string
+          format: date-time
+      required: [symbol, contractType, stake, payout, profit, result]
 
-    Stats:
+    DashboardSummary:
       type: object
-      required: [totalProfit, winRate, totalTrades, runningBots, winCount, lossCount]
       properties:
-        totalProfit:
-          type: number
-        winRate:
-          type: number
-        totalTrades:
+        connectedAccounts:
+          type: integer
+        totalBots:
           type: integer
         runningBots:
           type: integer
-        winCount:
+        totalTrades:
           type: integer
-        lossCount:
+        wins:
           type: integer
+        losses:
+          type: integer
+        winRate:
+          type: number
+        totalProfit:
+          type: number
+        bestSymbol:
+          type: string
+          nullable: true
+        activeAccount:
+          $ref: "#/components/schemas/Account"
+          nullable: true
+      required: [connectedAccounts, totalBots, runningBots, totalTrades, wins, losses, winRate, totalProfit]
+
+    EquityPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        equity:
+          type: number
+      required: [date, equity]
+
+    SymbolBreakdownItem:
+      type: object
+      properties:
+        symbol:
+          type: string
+        trades:
+          type: integer
+        profit:
+          type: number
+        winRate:
+          type: number
+      required: [symbol, trades, profit, winRate]

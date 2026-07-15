@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/"
-title = "RAYZPRO"
+title = "RAYZPRO — Deriv Companion"
 version = "1.0.0"
 id = "artifacts/rayzpro"
 router = "path"
@@ -11,12 +11,12 @@ paths = [ "/" ]
 localPort = 24881
 
 [services.development]
-run = "pnpm --filter @workspace/rayzpro run dev"
+run = "pnpm --filter @workspace/tradehub run dev"
 
 [services.production]
-build = [ "pnpm", "--filter", "@workspace/rayzpro", "run", "build" ]
+build = [ "pnpm", "--filter", "@workspace/tradehub", "run", "build" ]
 serve = "static"
-publicDir = "artifacts/rayzpro/dist/public"
+publicDir = "artifacts/tradehub/dist/public"
 
 [[services.production.rewrites]]
 from = "/*"
