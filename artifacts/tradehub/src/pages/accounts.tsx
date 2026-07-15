@@ -56,6 +56,7 @@ const DERIV_OAUTH_CLIENT_ID =
 /** localStorage keys — shared with the callback page */
 export const DERIV_PKCE_VERIFIER_KEY = "deriv_pkce_verifier";
 export const DERIV_PKCE_REDIRECT_KEY = "deriv_pkce_redirect";
+export const DERIV_PKCE_STATE_KEY    = "deriv_pkce_state";
 /** Written by the callback page to signal success to any open tab */
 export const DERIV_OAUTH_DONE_KEY    = "deriv_oauth_done";
 
@@ -162,19 +163,24 @@ export default function Accounts() {
 
     const verifier    = generateVerifier();
     const challenge   = await deriveChallenge(verifier);
+    const state       = generateVerifier().slice(0, 32); // CSRF token
     const redirectUri = getCallbackUrl();
 
     localStorage.setItem(DERIV_PKCE_VERIFIER_KEY, verifier);
     localStorage.setItem(DERIV_PKCE_REDIRECT_KEY,  redirectUri);
+    localStorage.setItem(DERIV_PKCE_STATE_KEY,     state);
 
+    // New Deriv API endpoint (auth.deriv.com) — required for apps registered
+    // at api.deriv.com. The old oauth.deriv.com endpoint is legacy-only.
     const url =
-      `https://oauth.deriv.com/oauth2/authorize` +
-      `?client_id=${encodeURIComponent(DERIV_OAUTH_CLIENT_ID)}` +
-      `&response_type=code` +
-      `&code_challenge=${encodeURIComponent(challenge)}` +
-      `&code_challenge_method=S256` +
+      `https://auth.deriv.com/oauth2/auth` +
+      `?response_type=code` +
+      `&client_id=${encodeURIComponent(DERIV_OAUTH_CLIENT_ID)}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
-      `&scope=trade`;
+      `&scope=trade` +
+      `&state=${encodeURIComponent(state)}` +
+      `&code_challenge=${encodeURIComponent(challenge)}` +
+      `&code_challenge_method=S256`;
 
     // Open in a new tab — avoids X-Frame-Options issues inside Replit preview
     // iframe, and works on mobile too. The callback page signals back via:

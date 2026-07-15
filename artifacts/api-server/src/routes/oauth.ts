@@ -17,7 +17,8 @@ import { fetchDerivAccountInfo, fetchDerivAccountsFromOAuth, DerivAuthError } fr
 const router: IRouter = Router();
 
 const DERIV_APP_ID   = process.env.DERIV_APP_ID ?? "";
-const TOKEN_ENDPOINT = "https://oauth.deriv.com/oauth2/token";
+// New Deriv API token endpoint — auth.deriv.com (not the legacy oauth.deriv.com)
+const TOKEN_ENDPOINT = "https://auth.deriv.com/oauth2/token";
 
 // ── Save a list of {loginid, token} pairs to the DB ──────────────────────────
 

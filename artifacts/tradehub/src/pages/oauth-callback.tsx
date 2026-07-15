@@ -24,6 +24,7 @@ import { getListAccountsQueryKey, getGetDashboardSummaryQueryKey } from "@worksp
 
 const DERIV_PKCE_VERIFIER_KEY = "deriv_pkce_verifier";
 const DERIV_PKCE_REDIRECT_KEY = "deriv_pkce_redirect";
+const DERIV_PKCE_STATE_KEY    = "deriv_pkce_state";
 const DERIV_OAUTH_DONE_KEY    = "deriv_oauth_done";
 
 type Status =
@@ -68,7 +69,8 @@ export default function OAuthCallback() {
     window.history.replaceState({}, "", window.location.pathname);
 
     const apiBase = import.meta.env.BASE_URL.replace(/\/$/, "");
-    const code    = params.get("code");
+    const code         = params.get("code");
+    const returnedState = params.get("state");
 
     // ── Error or empty redirect from Deriv ───────────────────────────────────
     if (!code) {
@@ -90,8 +92,20 @@ export default function OAuthCallback() {
     // ── PKCE code exchange ────────────────────────────────────────────────────
     const codeVerifier = localStorage.getItem(DERIV_PKCE_VERIFIER_KEY);
     const redirectUri  = localStorage.getItem(DERIV_PKCE_REDIRECT_KEY);
+    const storedState  = localStorage.getItem(DERIV_PKCE_STATE_KEY);
     localStorage.removeItem(DERIV_PKCE_VERIFIER_KEY);
     localStorage.removeItem(DERIV_PKCE_REDIRECT_KEY);
+    localStorage.removeItem(DERIV_PKCE_STATE_KEY);
+
+    // State mismatch = possible CSRF — abort
+    if (storedState && returnedState !== storedState) {
+      setStatus({
+        kind:    "error",
+        message: "State mismatch — the login session was tampered with.",
+        detail:  "Please try logging in again.",
+      });
+      return;
+    }
 
     if (!codeVerifier || !redirectUri) {
       setStatus({
